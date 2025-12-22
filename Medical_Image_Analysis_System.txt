@@ -1,0 +1,135 @@
+System Design for Medical Image Analysis Platform
+
+---
+
+## 1. Core Requirements
+
+1. Accept a URL containing images or folders.
+2. Extract and analyze images:
+   - Determine 2D or 3D volume.
+   - Identify modality: CT, MRI, X-ray, US, optical, etc.
+   - Identify anatomy: brain, liver, breast, etc.
+   - Identify special features: tumor, vascular structures.
+   - Handle multiple modalities per folder.
+3. Visualizations:
+   - Pie chart for percentage of images by modality.
+   - Flexible visualization options.
+4. Data storage:
+   - MongoDB / S3.
+5. Team collaboration:
+   - Share datasets across team members.
+   - Add/remove team members (permissions system).
+6. Frontend:
+   - Electron or React-based UI.
+   - Interactive, similar to Postman for dataset sharing.
+
+---
+
+## 2. High-Level System Architecture
+
++---------------------+
+|     Frontend        |
+| React / Electron    |
+| - Upload URL        |
+| - Visualization     |
+| - Share datasets    |
++----------+----------+
+           |
+           v
++---------------------+
+|  Backend API Server |
+| Python (FastAPI)    |
+| - URL fetch & extract|
+| - Image analysis     |
+| - Data persistence   |
+| - Access control     |
++----------+----------+
+           |
+           v
++---------------------+    +-----------------+
+| Image Analysis Layer|    |  Storage Layer  |
+| - Pydicom / Nibabel |    | - MongoDB       |
+| - OpenCV / PIL      |    | - AWS S3        |
+| - ML Models (CNN/   |    | - Redis (cache) |
+|   Transformers)     |    +-----------------+
++---------------------+
+           |
+           v
++---------------------+
+| Visualization Engine|
+| - Matplotlib / Plotly / Bokeh |
++---------------------+
+
+---
+
+## 3. Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Backend | Python, FastAPI |
+| Image Handling | Pydicom, Nibabel, OpenCV, Pillow |
+| ML/Feature Extraction | PyTorch / TensorFlow / MONAI |
+| Visualization | Plotly, Matplotlib, Seaborn, Bokeh |
+| Storage | MongoDB (metadata), AWS S3 (files) |
+| Auth & Team Access | JWT tokens, OAuth2, role-based access |
+| Frontend | React (web), Electron (desktop) |
+| Background Tasks | Celery + Redis |
+| Deployment | Docker/Kubernetes |
+
+---
+
+## 4. Data Processing Flow
+
+1. **URL ingestion**: download/unzip, detect file types.
+2. **Image analysis**:
+   - 2D vs 3D detection.
+   - Modality classification.
+   - Anatomy classification.
+   - Special features (tumor/vascular) detection.
+3. **Visualization & Reports**: pie charts, anatomy distributions.
+4. **Storage & Sharing**: S3 for raw files, MongoDB for metadata, role-based access.
+
+---
+
+## 5. Suggested ML Models
+
+- **Modality detection**: small CNN on labeled DICOM/NIfTI.
+- **Anatomy classification**: pretrained models on MedNIST or brain/MRI datasets.
+- **Special features**: MONAI/U-Net segmentation.
+
+---
+
+## 6. Frontend Interaction Flow
+
+- Enter URL → Backend fetches & processes.
+- Display:
+  - Image list (preview).
+  - Pie chart & other visualizations.
+  - Metadata table.
+- Share dataset: add team members, generate links.
+- Optional download from S3.
+
+---
+
+## 7. Collaboration & Sharing
+
+- Dataset has an ID.
+- User roles: Owner, Editor, Viewer.
+- API endpoints:
+  - POST /datasets/:id/share
+  - GET /datasets/:id
+  - GET /datasets/:id/files/:file_id
+
+---
+
+## 8. Scalability Considerations
+
+- Async Python (FastAPI) for multiple uploads.
+- Celery workers for heavy ML/analysis.
+- S3 for scalable storage.
+- MongoDB for schema-less metadata.
+- Redis for caching frequent queries.
+
+---
+
+Next Step: Draft a detailed component-level architecture diagram including API routes, MongoDB collections, ML processing pipeline, and frontend components.

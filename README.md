@@ -97,3 +97,66 @@ ________________________________________________________________________________
 **License**
 
 MIT License
+=======
+# DataScan — Medical Image Analysis Platform (MVP Scaffold)
+
+This repo is a starting implementation scaffold based on `Medical_Image_Analysis_System.txt`.
+
+## What the MVP will do
+- Ingest a **URL** that points to an archive (ex: `.zip`) or a single file.
+- Extract files, **sniff** common medical formats:
+  - DICOM (`.dcm` / DICM magic)
+  - NIfTI (`.nii` / `.nii.gz`)
+  - Common 2D images (`.png` / `.jpg`)
+- Derive a first-pass metadata + summary:
+  - **2D vs 3D** (basic heuristics)
+  - **Modality** (DICOM tag-based; otherwise `unknown`)
+  - Counts per modality for frontend pie chart
+- Store **metadata in MongoDB** (files can be kept on local disk for MVP; later S3/MinIO).
+
+## Project layout
+- `backend/`: FastAPI API + ingestion/analysis services
+- `docs/`: design notes (API, DB schema, component diagram)
+
+## Quickstart (local)
+1. Start MongoDB (no docker compose):
+
+```bash
+docker network create datascan-net 2>/dev/null || true
+docker run -d --name datascan-mongo --network datascan-net -p 27017:27017 -v datascan_mongo:/data/db mongo:7
+```
+
+2. Run the API (pick one approach):
+
+- A) Run locally with venv:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+uvicorn app.main:app --app-dir backend --reload --port 8000
+```
+
+- B) Run as a Docker image:
+
+```bash
+docker build -t datascan-api:dev -f backend/Dockerfile .
+docker run --rm --name datascan-api --network datascan-net -p 8000:8000 \
+  -e DATASCAN_MONGO_URL=mongodb://datascan-mongo:27017 \
+  -e DATASCAN_MONGO_DB=datascan \
+  datascan-api:dev
+```
+
+3. Ingest a URL:
+
+```bash
+curl -X POST http://localhost:8000/datasets/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/some-dataset.zip","name":"Example dataset"}'
+```
+
+## Next steps
+See `docs/component_level_architecture.md` for the proposed component/API/DB design, and how to extend this MVP into:
+- Celery/Redis background processing
+- S3/MinIO object storage
+- JWT auth + team sharing roles (Owner/Editor/Viewer)
