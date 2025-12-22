@@ -1,6 +1,6 @@
 **BioDataMine**
 
-**Understand your medical datasets before you train.**_
+**Understand your medical datasets before you train.**
 
 BioDataMine is a medical data intelligence platform designed to ingest, analyze, and visualize medical datasets, with a strong focus on medical imaging. It helps teams understand what is actually inside their data before starting model training, annotation, or deployment.
 
