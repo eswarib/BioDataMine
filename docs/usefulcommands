@@ -1,0 +1,7 @@
+docker exec -it datascan-mongo mongosh --eval 'db.getSiblingDB("datascan").dropDatabase()'
+
+curl -s http://localhost:8000/datasets
+
+curl -s http://localhost:8000/datasets/<datasetid>/summary
+
+curl -i -X POST http://localhost:8000/datasets/ingest   -H 'Content-Type: application/json'   -d '{"url":"https://www.kaggle.com/datasets/orvile/ultrasound-fetus-dataset","name":"local-test"}'

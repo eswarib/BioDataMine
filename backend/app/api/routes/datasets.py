@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
@@ -10,15 +9,18 @@ from app.models.datasets import (
     DatasetIngestRequest,
     DatasetIngestResponse,
     DatasetListItem,
+    DatasetSummaryResponse,
+    FileListItem,
 )
-from app.services.ingest import ingest_dataset
+from app.services.pipelines.dataset_pipeline import get_pipeline
+from app.services.pipelines.dataset_pipeline_controller import run_dataset_pipeline
 
 router = APIRouter()
 
 
 @router.post("/ingest", response_model=DatasetIngestResponse)
 async def ingest(req: DatasetIngestRequest):
-    # MVP: create dataset doc immediately, then process in a background task.
+    # Thin API: create dataset doc immediately, then enqueue a pipeline job.
     db = get_db()
     now = datetime.now(timezone.utc)
     doc = {
@@ -28,12 +30,24 @@ async def ingest(req: DatasetIngestRequest):
         "owner_user_id": None,  # Phase 2: from auth
         "status": "processing",
         "created_at": now,
-        "summary": {"total_files": 0, "modality_counts": {}, "image_2d_count": 0, "volume_3d_count": 0},
-        "meta": {},
+        "summary": {
+            "total_files": 0,
+            "scheduled_files": 0,
+            "modality_counts": {},
+            "kind_counts": {},
+            "ext_counts": {},
+            "scheduled_ext_counts": {},
+            "duplicate_basename_count": 0,
+            "duplicate_basename_ext_counts": {},
+            "image_2d_count": 0,
+            "volume_3d_count": 0,
+        },
+        "meta": {"stage": "enqueued"},
     }
     res = await db["datasets"].insert_one(doc)
     dataset_id = str(res.inserted_id)
-    asyncio.create_task(ingest_dataset(dataset_id, req.url))
+    p = get_pipeline(runner=run_dataset_pipeline)
+    await p.enqueue_dataset(dataset_id, req.url)
     return DatasetIngestResponse(dataset_id=dataset_id, status="processing")
 
 
@@ -49,7 +63,21 @@ async def list_datasets():
                 name=d.get("name", "Untitled dataset"),
                 status=d.get("status", "processing"),
                 created_at=d.get("created_at", datetime.now(timezone.utc)),
-                summary=d.get("summary", {"total_files": 0, "modality_counts": {}, "image_2d_count": 0, "volume_3d_count": 0}),
+                summary=d.get(
+                    "summary",
+                    {
+                        "total_files": 0,
+                        "scheduled_files": 0,
+                        "modality_counts": {},
+                        "kind_counts": {},
+                        "ext_counts": {},
+                        "scheduled_ext_counts": {},
+                        "duplicate_basename_count": 0,
+                        "duplicate_basename_ext_counts": {},
+                        "image_2d_count": 0,
+                        "volume_3d_count": 0,
+                    },
+                ),
             )
         )
     return items
@@ -63,6 +91,68 @@ async def get_dataset(dataset_id: str):
         raise HTTPException(status_code=404, detail="dataset not found")
     d["_id"] = str(d["_id"])
     return d
+
+
+@router.get("/{dataset_id}/summary", response_model=DatasetSummaryResponse)
+async def get_dataset_summary(dataset_id: str):
+    db = get_db()
+    d = await db["datasets"].find_one({"_id": _object_id(dataset_id)}, projection={"summary": 1, "meta.stage": 1})
+    if not d:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    summary = d.get("summary") or {}
+    stage = (d.get("meta") or {}).get("stage") or "unknown"
+    modality_counts = summary.get("modality_counts") or {}
+    kind_counts = summary.get("kind_counts") or {}
+    ext_counts = summary.get("ext_counts") or {}
+    scheduled_ext_counts = summary.get("scheduled_ext_counts") or {}
+    duplicate_basename_ext_counts = summary.get("duplicate_basename_ext_counts") or {}
+    total = sum(int(v) for v in modality_counts.values() if isinstance(v, (int, float)))
+    modality_percentages = {}
+    if total > 0:
+        modality_percentages = {k: (float(v) / float(total)) * 100.0 for k, v in modality_counts.items()}
+    return DatasetSummaryResponse(
+        total_files=int(summary.get("total_files") or 0),
+        scheduled_files=int(summary.get("scheduled_files") or 0),
+        modality_counts=modality_counts,
+        kind_counts=kind_counts,
+        ext_counts=ext_counts,
+        scheduled_ext_counts=scheduled_ext_counts,
+        duplicate_basename_count=int(summary.get("duplicate_basename_count") or 0),
+        duplicate_basename_ext_counts=duplicate_basename_ext_counts,
+        image_2d_count=int(summary.get("image_2d_count") or 0),
+        volume_3d_count=int(summary.get("volume_3d_count") or 0),
+        stage=stage,
+        modality_percentages=modality_percentages,
+    )
+
+
+@router.get("/{dataset_id}/files", response_model=list[FileListItem])
+async def list_dataset_files(dataset_id: str, skip: int = 0, limit: int = 200):
+    # dataset_id must exist and must be a valid ObjectId (keeps behavior consistent with GET /datasets/{dataset_id})
+    _ = _object_id(dataset_id)
+    if skip < 0:
+        raise HTTPException(status_code=400, detail="skip must be >= 0")
+    if limit < 1 or limit > 2000:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 2000")
+
+    db = get_db()
+    cursor = db["files"].find({"dataset_id": dataset_id}, sort=[("relpath", 1)], skip=skip, limit=limit)
+    out: list[FileListItem] = []
+    async for f in cursor:
+        out.append(
+            FileListItem(
+                dataset_id=f.get("dataset_id", dataset_id),
+                relpath=f.get("relpath", ""),
+                kind=f.get("kind", "unknown"),
+                modality=f.get("modality", "unknown"),
+                ndim=f.get("ndim"),
+                dims=f.get("dims"),
+                size_bytes=int(f.get("size_bytes") or 0),
+                created_at=f.get("created_at", datetime.now(timezone.utc)),
+                meta=f.get("meta", {}) or {},
+            )
+        )
+    return out
 
 
 def _object_id(s: str):

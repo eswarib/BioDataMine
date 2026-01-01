@@ -18,7 +18,16 @@ class DatasetIngestRequest(BaseModel):
 
 class DatasetSummary(BaseModel):
     total_files: int = 0
+    scheduled_files: int = 0
     modality_counts: dict[str, int] = Field(default_factory=dict)
+    modalities: dict[str, dict] = Field(default_factory=dict)
+    mixed_modality: bool | None = None
+    outliers: int = 0
+    kind_counts: dict[str, int] = Field(default_factory=dict)
+    ext_counts: dict[str, int] = Field(default_factory=dict)
+    scheduled_ext_counts: dict[str, int] = Field(default_factory=dict)
+    duplicate_basename_count: int = 0
+    duplicate_basename_ext_counts: dict[str, int] = Field(default_factory=dict)
     image_2d_count: int = 0
     volume_3d_count: int = 0
 
@@ -46,5 +55,23 @@ class DatasetListItem(BaseModel):
     status: DatasetStatus
     created_at: datetime
     summary: DatasetSummary
+
+
+class DatasetSummaryResponse(DatasetSummary):
+    stage: str = "unknown"
+    modality_percentages: dict[str, float] = Field(default_factory=dict)
+
+
+class FileListItem(BaseModel):
+    dataset_id: str
+    relpath: str
+    kind: FileKind
+    modality: str
+    modality_model: dict = Field(default_factory=dict)
+    ndim: int | None = None
+    dims: list[int] | None = None
+    size_bytes: int = 0
+    created_at: datetime
+    meta: dict[str, Any] = Field(default_factory=dict)
 
 

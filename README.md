@@ -155,8 +155,54 @@ curl -X POST http://localhost:8000/datasets/ingest \
   -d '{"url":"https://example.com/some-dataset.zip","name":"Example dataset"}'
 ```
 
+## Kaggle datasets (provider)
+Kaggle dataset pages are not direct `.zip` links and typically require authentication.
+This backend supports Kaggle dataset URLs of the form:
+- `https://www.kaggle.com/datasets/<owner>/<dataset-slug>`
+
+### Auth (choose one)
+- **Env vars**: set `KAGGLE_USERNAME` and `KAGGLE_KEY`
+- **kaggle.json**: mount a `kaggle.json` to `/root/.kaggle/kaggle.json` inside the API container
+
+### Docker example
+```bash
+docker run --rm --name datascan-api --network datascan-net -p 8000:8000 \
+  -e DATASCAN_MONGO_URL=mongodb://datascan-mongo:27017 \
+  -e DATASCAN_MONGO_DB=datascan \
+  -e KAGGLE_USERNAME=your_username \
+  -e KAGGLE_KEY=your_key \
+  datascan-api:dev
+```
+
+### Ingest a Kaggle dataset page URL
+```bash
+curl -X POST http://localhost:8000/datasets/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://www.kaggle.com/datasets/orvile/ultrasound-fetus-dataset","name":"kaggle-ultrasound-fetus"}'
+```
+
 ## Next steps
 See `docs/component_level_architecture.md` for the proposed component/API/DB design, and how to extend this MVP into:
 - Celery/Redis background processing
 - S3/MinIO object storage
 - JWT auth + team sharing roles (Owner/Editor/Viewer)
+
+## Ingest providers (modular)
+Ingestion supports multiple URL types via pluggable providers (see `backend/app/services/providers/`).
+
+### Supported URL inputs
+- **Direct file URLs**: `.zip`, `.nii`, `.nii.gz`, `.dcm`, `.png`, `.jpeg`, `.jpg`
+- **HTML pages (same-origin link resolution)**: best-effort: parses `<a href>` links and chooses a likely downloadable artifact
+- **Kaggle dataset pages**: `https://www.kaggle.com/datasets/<owner>/<dataset-slug>` (uses Kaggle API)
+- **GitHub repo URLs**: `https://github.com/<owner>/<repo>` or `/tree/<ref>` (downloads a zipball via GitHub API)
+- **Authenticated HTTP (non-interactive)**: optional headers/basic-auth via env (does NOT solve SSO/SAML interactive logins)
+
+### Provider-specific configuration
+- **Kaggle**
+  - Env: `KAGGLE_USERNAME`, `KAGGLE_KEY`
+  - Or mount: `~/.kaggle/kaggle.json` to `/root/.kaggle/kaggle.json`
+- **GitHub**
+  - Optional token: `DATASCAN_GITHUB_TOKEN` (private repos / higher rate limits)
+- **Authenticated HTTP**
+  - `DATASCAN_HTTP_HEADERS_JSON`: JSON dict of headers, e.g. `{"Authorization":"Bearer ...","Cookie":"..."}`
+  - `DATASCAN_HTTP_BASIC_USER` / `DATASCAN_HTTP_BASIC_PASS`

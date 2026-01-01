@@ -105,3 +105,6 @@ def _safe_stat_size(path: Path) -> int:
         return 0
 
 
+
+
+
