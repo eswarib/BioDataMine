@@ -1,0 +1,108 @@
+# BioDataMine Docker Compose
+# ==========================
+# Orchestrates MongoDB, Backend API, and Frontend services
+#
+# Usage:
+#   docker compose up --build         # Build and start all services
+#   docker compose up -d              # Start in detached mode
+#   docker compose down               # Stop all services
+#   docker compose down -v            # Stop and remove volumes (clears DB)
+#   docker compose logs -f            # Follow all logs
+#   docker compose logs -f datascan-api  # Follow API logs only
+
+services:
+  # ---------------------------------------------------------------------------
+  # MongoDB Database
+  # ---------------------------------------------------------------------------
+  mongo:
+    image: mongo:7
+    container_name: biodatamine-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - biodatamine-network
+
+  # ---------------------------------------------------------------------------
+  # Backend API (FastAPI)
+  # ---------------------------------------------------------------------------
+  datascan-api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: biodatamine-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATASCAN_MONGO_URL=mongodb://mongo:27017
+      - DATASCAN_MONGO_DB=datascan
+      - DATASCAN_DATA_ROOT=/data/datascan
+      - DATASCAN_PIPELINE_ENABLED=true
+      - DATASCAN_PIPELINE_FILE_CONCURRENCY=32
+      - DATASCAN_PREDICTION_LOG_PATH=/data/datascan/prediction_logs
+      # Kaggle API credentials (required for Kaggle dataset ingestion)
+      # Set these in a .env file or export in your shell
+      - KAGGLE_USERNAME
+      - KAGGLE_KEY
+    volumes:
+      - datascan_data:/data/datascan
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - biodatamine-network
+
+  # ---------------------------------------------------------------------------
+  # Frontend (React + Nginx)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: biodatamine-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://datascan-api:8000
+    depends_on:
+      datascan-api:
+        condition: service_healthy
+    networks:
+      - biodatamine-network
+
+# -----------------------------------------------------------------------------
+# Volumes - Persistent storage
+# -----------------------------------------------------------------------------
+volumes:
+  mongo_data:
+    driver: local
+  datascan_data:
+    driver: local
+
+# -----------------------------------------------------------------------------
+# Networks
+# -----------------------------------------------------------------------------
+networks:
+  biodatamine-network:
+    driver: bridge
+
+
+
+
+

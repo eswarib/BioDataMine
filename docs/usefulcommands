@@ -5,3 +5,26 @@ curl -s http://localhost:8000/datasets
 curl -s http://localhost:8000/datasets/<datasetid>/summary
 
 curl -i -X POST http://localhost:8000/datasets/ingest   -H 'Content-Type: application/json'   -d '{"url":"https://www.kaggle.com/datasets/orvile/ultrasound-fetus-dataset","name":"local-test"}'
+
+docker build --progress=plain -t datascan-api -f backend/Dockerfile .
+
+docker network create datascan-net || true
+
+docker run -d \
+  --name datascan-mongo \
+  --network datascan-net \
+  -p 27017:27017 \
+  -v /disc2/mongo-data:/data/db \
+  mongo:7.0
+
+docker run -d \
+  --name datascan-api \
+  --network datascan-net \
+  -p 8000:8000 \
+  -v /disc2/datascan-workspaces:/app/workspaces \
+  -e DATASCAN_DATA_ROOT="/app/workspaces" \
+  -e KAGGLE_USERNAME="eswarimathialagan" \
+  -e KAGGLE_KEY="KGAT_e79b52a98df3c725d0ba7d3b3f3ba044" \
+  -e DATASCAN_MONGO_URL="mongodb://datascan-mongo:27017" \
+  datascan-api:latest
+

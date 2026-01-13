@@ -41,6 +41,8 @@ class DatasetPipeline:
     async def _worker_loop(self) -> None:
         while not self._stop_event.is_set():
             job = await self._q.get()
+            from app.services.pipelines.dataset_pipeline_controller import logger
+            logger.info("pipeline-worker: picked up dataset_id=%s url=%s", job.dataset_id, job.url)
             try:
                 await self._runner(job)
             finally:

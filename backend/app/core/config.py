@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     data_root: str = "/tmp/datascan"
 
     # Ingestion guardrails (bytes)
-    max_download_bytes: int = 2_000_000_000  # 2GB
-    max_extracted_bytes: int = 5_000_000_000  # 5GB
+    max_download_bytes: int = 7_000_000_000  # 7GB
+    max_extracted_bytes: int = 12_000_000_000  # 12GB
     max_files_per_dataset: int = 50_000
 
     # Providers
@@ -26,6 +26,17 @@ class Settings(BaseSettings):
     pipeline_file_concurrency: int = 32
     pipeline_mongo_batch_size: int = 10
     pipeline_batch_flush_seconds: float = 1.0
+
+    # Modality CNN classifier settings
+    modality_cnn_backbone: str = "efficientnet_b0"  # timm model name
+    modality_cnn_weights_path: str | None = None  # Path to fine-tuned weights (.pt file)
+    modality_cnn_device: str | None = None  # None=auto, "cpu", or "cuda"
+
+    # Prediction logging for retraining
+    prediction_log_enabled: bool = True
+    prediction_log_path: str = "/tmp/datascan/prediction_logs"  # Directory for JSONL logs
+    prediction_log_low_confidence_threshold: float = 0.6  # Flag predictions below this
+    prediction_log_include_embeddings: bool = False  # Whether to save embeddings (large!)
 
 
 settings = Settings()

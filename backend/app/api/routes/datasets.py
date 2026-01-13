@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
+from app.core.dataset_url_finder import resolve_dataset_url
 from app.db.mongo import get_db
 from app.models.datasets import (
     DatasetIngestRequest,
@@ -16,39 +18,99 @@ from app.services.pipelines.dataset_pipeline import get_pipeline
 from app.services.pipelines.dataset_pipeline_controller import run_dataset_pipeline
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _extract_dataset_name(url: str) -> str:
+    """Extract a readable name from a dataset URL."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    parts = [p for p in parsed.path.split("/") if p]
+    if len(parts) >= 3 and parts[0] == "datasets":
+        return parts[2].replace("-", " ").replace("_", " ").title()
+    return "Untitled dataset"
 
 
 @router.post("/ingest", response_model=DatasetIngestResponse)
 async def ingest(req: DatasetIngestRequest):
-    # Thin API: create dataset doc immediately, then enqueue a pipeline job.
+    """
+    Ingest a dataset from a URL.
+    
+    Supports:
+    - Direct dataset URLs (Kaggle, GitHub, HTTP)
+    - Kaggle notebook URLs (resolves to all input datasets, each gets unique ID)
+    """
     db = get_db()
     now = datetime.now(timezone.utc)
-    doc = {
-        "name": req.name or "Untitled dataset",
-        "source_url": req.url,
-        "team_id": req.team_id,
-        "owner_user_id": None,  # Phase 2: from auth
-        "status": "processing",
-        "created_at": now,
-        "summary": {
-            "total_files": 0,
-            "scheduled_files": 0,
-            "modality_counts": {},
-            "kind_counts": {},
-            "ext_counts": {},
-            "scheduled_ext_counts": {},
-            "duplicate_basename_count": 0,
-            "duplicate_basename_ext_counts": {},
-            "image_2d_count": 0,
-            "volume_3d_count": 0,
-        },
-        "meta": {"stage": "enqueued"},
-    }
-    res = await db["datasets"].insert_one(doc)
-    dataset_id = str(res.inserted_id)
+    
+    # Resolve URL to actual dataset URLs (handles notebook -> datasets conversion)
+    resolved = resolve_dataset_url(req.url)
+    
+    logger.info(
+        "URL resolution: %s -> %s (%d URLs)",
+        req.url, resolved.source_type, len(resolved.resolved_urls)
+    )
+    
+    # Create a dataset entry for each resolved URL
+    dataset_ids = []
     p = get_pipeline(runner=run_dataset_pipeline)
-    await p.enqueue_dataset(dataset_id, req.url)
-    return DatasetIngestResponse(dataset_id=dataset_id, status="processing")
+    
+    for idx, dataset_url in enumerate(resolved.resolved_urls):
+        # Generate name for each dataset
+        if req.name and len(resolved.resolved_urls) == 1:
+            name = req.name
+        elif req.name and len(resolved.resolved_urls) > 1:
+            name = f"{req.name} ({idx + 1}/{len(resolved.resolved_urls)})"
+        else:
+            name = _extract_dataset_name(dataset_url)
+        
+        doc = {
+            "name": name,
+            "source_url": dataset_url,
+            "original_request_url": req.url,  # Track the original notebook URL
+            "team_id": req.team_id,
+            "owner_user_id": None,  # Phase 2: from auth
+            "status": "processing",
+            "created_at": now,
+            "summary": {
+                "total_files": 0,
+                "scheduled_files": 0,
+                "modality_counts": {},
+                "kind_counts": {},
+                "ext_counts": {},
+                "scheduled_ext_counts": {},
+                "duplicate_basename_count": 0,
+                "duplicate_basename_ext_counts": {},
+                "image_2d_count": 0,
+                "volume_3d_count": 0,
+            },
+            "meta": {
+                "stage": "enqueued",
+                "source_type": resolved.source_type,
+                "notebook_metadata": resolved.metadata if resolved.source_type == "kaggle_notebook" else None,
+            },
+        }
+        
+        res = await db["datasets"].insert_one(doc)
+        dataset_id = str(res.inserted_id)
+        dataset_ids.append(dataset_id)
+        
+        # Enqueue the dataset URL (not the original notebook URL)
+        await p.enqueue_dataset(dataset_id, dataset_url)
+        
+        logger.info(
+            "Created dataset %s for URL %s (from %s)",
+            dataset_id, dataset_url, req.url
+        )
+    
+    # Return response with first dataset as primary, but include all IDs
+    return DatasetIngestResponse(
+        dataset_id=dataset_ids[0],
+        status="processing",
+        all_dataset_ids=dataset_ids if len(dataset_ids) > 1 else None,
+        source_type=resolved.source_type,
+        resolved_urls=resolved.resolved_urls if len(resolved.resolved_urls) > 1 else None,
+    )
 
 
 @router.get("", response_model=list[DatasetListItem])

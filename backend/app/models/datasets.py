@@ -47,6 +47,10 @@ class DatasetDoc(BaseModel):
 class DatasetIngestResponse(BaseModel):
     dataset_id: str
     status: DatasetStatus
+    # For notebook URLs that resolve to multiple datasets
+    all_dataset_ids: list[str] | None = None
+    source_type: str = "direct"  # "direct", "kaggle_notebook", etc.
+    resolved_urls: list[str] | None = None
 
 
 class DatasetListItem(BaseModel):
