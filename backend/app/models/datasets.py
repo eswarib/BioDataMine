@@ -18,14 +18,12 @@ class DatasetIngestRequest(BaseModel):
 
 class DatasetSummary(BaseModel):
     total_files: int = 0
-    scheduled_files: int = 0
     modality_counts: dict[str, int] = Field(default_factory=dict)
     modalities: dict[str, dict] = Field(default_factory=dict)
     mixed_modality: bool | None = None
     outliers: int = 0
     kind_counts: dict[str, int] = Field(default_factory=dict)
     ext_counts: dict[str, int] = Field(default_factory=dict)
-    scheduled_ext_counts: dict[str, int] = Field(default_factory=dict)
     duplicate_basename_count: int = 0
     duplicate_basename_ext_counts: dict[str, int] = Field(default_factory=dict)
     image_2d_count: int = 0
@@ -34,6 +32,7 @@ class DatasetSummary(BaseModel):
 
 class DatasetDoc(BaseModel):
     id: str = Field(alias="_id")
+    dataset_id: str  # Unique UUID for external identification
     name: str
     source_url: str
     team_id: str | None = None

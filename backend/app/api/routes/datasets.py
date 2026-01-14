@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
@@ -19,6 +20,11 @@ from app.services.pipelines.dataset_pipeline_controller import run_dataset_pipel
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _generate_dataset_id() -> str:
+    """Generate a unique dataset ID using UUID4."""
+    return str(uuid.uuid4())
 
 
 def _extract_dataset_name(url: str) -> str:
@@ -56,6 +62,9 @@ async def ingest(req: DatasetIngestRequest):
     p = get_pipeline(runner=run_dataset_pipeline)
     
     for idx, dataset_url in enumerate(resolved.resolved_urls):
+        # Generate unique dataset ID
+        dataset_id = _generate_dataset_id()
+        
         # Generate name for each dataset
         if req.name and len(resolved.resolved_urls) == 1:
             name = req.name
@@ -65,6 +74,7 @@ async def ingest(req: DatasetIngestRequest):
             name = _extract_dataset_name(dataset_url)
         
         doc = {
+            "dataset_id": dataset_id,  # Unique ID for external use
             "name": name,
             "source_url": dataset_url,
             "original_request_url": req.url,  # Track the original notebook URL
@@ -74,11 +84,9 @@ async def ingest(req: DatasetIngestRequest):
             "created_at": now,
             "summary": {
                 "total_files": 0,
-                "scheduled_files": 0,
                 "modality_counts": {},
                 "kind_counts": {},
                 "ext_counts": {},
-                "scheduled_ext_counts": {},
                 "duplicate_basename_count": 0,
                 "duplicate_basename_ext_counts": {},
                 "image_2d_count": 0,
@@ -91,8 +99,7 @@ async def ingest(req: DatasetIngestRequest):
             },
         }
         
-        res = await db["datasets"].insert_one(doc)
-        dataset_id = str(res.inserted_id)
+        await db["datasets"].insert_one(doc)
         dataset_ids.append(dataset_id)
         
         # Enqueue the dataset URL (not the original notebook URL)
@@ -121,7 +128,7 @@ async def list_datasets():
     async for d in cursor:
         items.append(
             DatasetListItem(
-                dataset_id=str(d["_id"]),
+                dataset_id=d.get("dataset_id", str(d["_id"])),  # Fallback for legacy records
                 name=d.get("name", "Untitled dataset"),
                 status=d.get("status", "processing"),
                 created_at=d.get("created_at", datetime.now(timezone.utc)),
@@ -129,11 +136,9 @@ async def list_datasets():
                     "summary",
                     {
                         "total_files": 0,
-                        "scheduled_files": 0,
                         "modality_counts": {},
                         "kind_counts": {},
                         "ext_counts": {},
-                        "scheduled_ext_counts": {},
                         "duplicate_basename_count": 0,
                         "duplicate_basename_ext_counts": {},
                         "image_2d_count": 0,
@@ -148,7 +153,11 @@ async def list_datasets():
 @router.get("/{dataset_id}")
 async def get_dataset(dataset_id: str):
     db = get_db()
-    d = await db["datasets"].find_one({"_id": _object_id(dataset_id)})
+    # Try lookup by dataset_id first, fallback to _id for legacy records
+    d = await db["datasets"].find_one({"dataset_id": dataset_id})
+    if not d:
+        # Fallback: try as MongoDB ObjectId for legacy records
+        d = await db["datasets"].find_one({"_id": _object_id_or_none(dataset_id)})
     if not d:
         raise HTTPException(status_code=404, detail="dataset not found")
     d["_id"] = str(d["_id"])
@@ -158,7 +167,10 @@ async def get_dataset(dataset_id: str):
 @router.get("/{dataset_id}/summary", response_model=DatasetSummaryResponse)
 async def get_dataset_summary(dataset_id: str):
     db = get_db()
-    d = await db["datasets"].find_one({"_id": _object_id(dataset_id)}, projection={"summary": 1, "meta.stage": 1})
+    # Try lookup by dataset_id first, fallback to _id for legacy records
+    d = await db["datasets"].find_one({"dataset_id": dataset_id}, projection={"summary": 1, "meta.stage": 1})
+    if not d:
+        d = await db["datasets"].find_one({"_id": _object_id_or_none(dataset_id)}, projection={"summary": 1, "meta.stage": 1})
     if not d:
         raise HTTPException(status_code=404, detail="dataset not found")
     summary = d.get("summary") or {}
@@ -166,7 +178,6 @@ async def get_dataset_summary(dataset_id: str):
     modality_counts = summary.get("modality_counts") or {}
     kind_counts = summary.get("kind_counts") or {}
     ext_counts = summary.get("ext_counts") or {}
-    scheduled_ext_counts = summary.get("scheduled_ext_counts") or {}
     duplicate_basename_ext_counts = summary.get("duplicate_basename_ext_counts") or {}
     total = sum(int(v) for v in modality_counts.values() if isinstance(v, (int, float)))
     modality_percentages = {}
@@ -174,11 +185,9 @@ async def get_dataset_summary(dataset_id: str):
         modality_percentages = {k: (float(v) / float(total)) * 100.0 for k, v in modality_counts.items()}
     return DatasetSummaryResponse(
         total_files=int(summary.get("total_files") or 0),
-        scheduled_files=int(summary.get("scheduled_files") or 0),
         modality_counts=modality_counts,
         kind_counts=kind_counts,
         ext_counts=ext_counts,
-        scheduled_ext_counts=scheduled_ext_counts,
         duplicate_basename_count=int(summary.get("duplicate_basename_count") or 0),
         duplicate_basename_ext_counts=duplicate_basename_ext_counts,
         image_2d_count=int(summary.get("image_2d_count") or 0),
@@ -190,8 +199,6 @@ async def get_dataset_summary(dataset_id: str):
 
 @router.get("/{dataset_id}/files", response_model=list[FileListItem])
 async def list_dataset_files(dataset_id: str, skip: int = 0, limit: int = 200):
-    # dataset_id must exist and must be a valid ObjectId (keeps behavior consistent with GET /datasets/{dataset_id})
-    _ = _object_id(dataset_id)
     if skip < 0:
         raise HTTPException(status_code=400, detail="skip must be >= 0")
     if limit < 1 or limit > 2000:
@@ -217,12 +224,12 @@ async def list_dataset_files(dataset_id: str, skip: int = 0, limit: int = 200):
     return out
 
 
-def _object_id(s: str):
+def _object_id_or_none(s: str):
+    """Try to convert string to MongoDB ObjectId, return None if invalid."""
     try:
         from bson import ObjectId
-
         return ObjectId(s)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="invalid dataset id") from e
+    except Exception:
+        return None
 
 

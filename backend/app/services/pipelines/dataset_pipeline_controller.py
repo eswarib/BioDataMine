@@ -39,7 +39,8 @@ class DatasetPipelineController:
         self.dataset_id = job.dataset_id
         self.url = job.url
         self.db = get_db()
-        self.ds_oid = PipelineHelpers.object_id(job.dataset_id)
+        # Query filter for this dataset (uses dataset_id field, not MongoDB _id)
+        self.ds_filter = {"dataset_id": self.dataset_id}
 
         # Counters for summary
         self.modality_counts: Counter[str] = Counter()
@@ -72,7 +73,7 @@ class DatasetPipelineController:
         except Exception as e:
             logger.exception("dataset=%s pipeline failed: %s", self.dataset_id, repr(e))
             await self.db["datasets"].update_one(
-                {"_id": self.ds_oid},
+                self.ds_filter,
                 {"$set": {"status": "failed", "meta.stage": "failed", "meta.last_error": repr(e)}},
             )
 
@@ -80,7 +81,7 @@ class DatasetPipelineController:
         """Stage 1: Download and extract the dataset."""
         logger.info("dataset=%s stage=prepare starting url=%s", self.dataset_id, self.url)
         await self.db["datasets"].update_one(
-            {"_id": self.ds_oid},
+            self.ds_filter,
             {"$set": {"status": "processing", "meta.stage": "prepare"}},
         )
 
@@ -93,7 +94,7 @@ class DatasetPipelineController:
         )
 
         await self.db["datasets"].update_one(
-            {"_id": self.ds_oid},
+            self.ds_filter,
             {
                 "$set": {
                     "meta.ingest.provider": self.prep.provider,
@@ -181,20 +182,18 @@ class DatasetPipelineController:
         self.volume_3d_count += dicom_volume_count
 
         await self.db["datasets"].update_one(
-            {"_id": self.ds_oid},
+            self.ds_filter,
             {
                 "$set": {
                     "meta.stage": "finalize",
                     "summary": {
                         "total_files": self.total_files,
-                        "scheduled_files": self.scheduled,
                         "modality_counts": dict(self.modality_counts),
                         "modalities": PipelineHelpers.build_modalities_profile(self.modality_counts, self.total_files),
                         "mixed_modality": PipelineHelpers.is_mixed_modality(self.modality_counts),
                         "outliers": 0,  # placeholder until OOD scoring is wired
                         "kind_counts": dict(self.kind_counts),
                         "ext_counts": dict(self.ext_counts),
-                        "scheduled_ext_counts": dict(self.scheduled_ext_counts),
                         "duplicate_basename_count": int(self.duplicate_basename_count),
                         "duplicate_basename_ext_counts": dict(self.duplicate_basename_ext_counts),
                         "image_2d_count": self.image_2d_count,
