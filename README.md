@@ -75,6 +75,11 @@ Research labs and startups
 Teams working with public or internal medical datasets
 _______________________________________________________________________________________________________________________
 
+**How it looks?**
+<img width="1846" height="876" alt="Screenshot from 2026-01-19 12-49-19" src="https://github.com/user-attachments/assets/5ea2fde2-6cf7-4c6d-aa7d-805686ae951c" />
+
+_______________________________________________________________________________________________________________________
+
 **Project Status**
 
 🚧 Actively under development
